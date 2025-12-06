@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { X, Plus, Trash2, Settings, Tag, Moon, Sun, Monitor, Download, Upload, HardDrive, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { Theme } from '../App';
+import { X, Plus, Trash2, Settings, Tag, Moon, Sun, Monitor, Download, Upload, HardDrive, AlertCircle, CheckCircle2, Clipboard, Map, Database, Globe } from 'lucide-react';
+import type { Theme } from '../App';
 import { localDB } from '../services/db';
 
 interface SettingsModalProps {
@@ -13,6 +13,10 @@ interface SettingsModalProps {
   theme: Theme;
   setTheme: (theme: Theme) => void;
   onImport: (data: any) => void;
+  onImportFromText: (text: string) => void;
+  onImportGoogleTakeout: (json: string) => void;
+  onLoad7Wonders: () => void;
+  onLoadNearbyDemo: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -24,12 +28,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   setCustomInterests,
   theme,
   setTheme,
-  onImport
+  onImport,
+  onImportFromText,
+  onImportGoogleTakeout,
+  onLoad7Wonders,
+  onLoadNearbyDemo
 }) => {
   const [newBucket, setNewBucket] = useState('');
   const [newInterest, setNewInterest] = useState('');
   const [importMsg, setImportMsg] = useState<{type: 'success' | 'error', text: string} | null>(null);
+  const [clipboardText, setClipboardText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const takeoutInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -80,6 +90,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
     
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleTextImport = () => {
+    if (!clipboardText.trim()) return;
+    onImportFromText(clipboardText);
+    setClipboardText('');
+    setImportMsg({ type: 'success', text: 'Items imported from text successfully.' });
+  };
+
+  const handleTakeoutChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = event.target?.result as string;
+        onImportGoogleTakeout(json);
+        setImportMsg({ type: 'success', text: 'Google Takeout data processed.' });
+      } catch (err) {
+        setImportMsg({ type: 'error', text: 'Invalid JSON file.' });
+      }
+    };
+    reader.readAsText(file);
+    if (takeoutInputRef.current) takeoutInputRef.current.value = '';
+  };
+
+  const handle7WondersClick = () => {
+    onLoad7Wonders();
+    setImportMsg({ type: 'success', text: '7 Wonders demo data loaded!' });
+  };
+
+  const handleNearbyClick = () => {
+    onLoadNearbyDemo();
+    setImportMsg({ type: 'success', text: 'Nearby demo data loaded!' });
   };
 
   return (
@@ -141,37 +186,97 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <div className="h-px bg-gray-100 dark:bg-gray-700 w-full"></div>
 
+          {/* Quick Import */}
+          <section>
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Clipboard size={16} /> Quick Import
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              Paste your bucket list (e.g. from Instagram notes) here. One item per line.
+            </p>
+            <div className="space-y-2">
+              <textarea 
+                value={clipboardText}
+                onChange={(e) => setClipboardText(e.target.value)}
+                placeholder="Visit Paris&#10;Skydiving&#10;Learn Guitar"
+                className="w-full h-24 p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+              />
+              <button 
+                onClick={handleTextImport}
+                disabled={!clipboardText.trim()}
+                className="w-full py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Add Items
+              </button>
+            </div>
+          </section>
+
+          <div className="h-px bg-gray-100 dark:bg-gray-700 w-full"></div>
+
           {/* Data & Backup */}
           <section>
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wider mb-3 flex items-center gap-2">
               <HardDrive size={16} /> Data & Backup
             </h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-              Export your local data to save it to Google Drive or Files.
+              Manage your data source and backups.
             </p>
 
             <div className="flex flex-col gap-3">
-              <button 
-                onClick={handleExport}
-                className="flex items-center justify-center gap-2 w-full py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-medium transition-colors border border-gray-200 dark:border-gray-600"
-              >
-                <Download size={16} />
-                Export Backup (Save to Drive)
-              </button>
-
               <div className="relative">
                 <input 
-                  ref={fileInputRef}
+                  ref={takeoutInputRef}
                   type="file" 
                   accept=".json"
-                  onChange={handleFileChange}
+                  onChange={handleTakeoutChange}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 />
+                <button className="flex items-center justify-center gap-2 w-full py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium transition-colors border border-blue-200 dark:border-blue-800 pointer-events-none">
+                  <Map size={16} /> Import Google Takeout (Saved Places)
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <button 
-                  className="flex items-center justify-center gap-2 w-full py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-medium transition-colors border border-gray-200 dark:border-gray-600 pointer-events-none"
+                  onClick={handleExport}
+                  className="flex items-center justify-center gap-2 py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-medium transition-colors border border-gray-200 dark:border-gray-600"
                 >
-                  <Upload size={16} />
-                  Restore from Backup
+                  <Download size={16} />
+                  Export
+                </button>
+
+                <div className="relative">
+                  <input 
+                    ref={fileInputRef}
+                    type="file" 
+                    accept=".json"
+                    onChange={handleFileChange}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <button 
+                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-medium transition-colors border border-gray-200 dark:border-gray-600 pointer-events-none"
+                  >
+                    <Upload size={16} />
+                    Restore
+                  </button>
+                </div>
+              </div>
+
+              {/* Demo Data Buttons */}
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button 
+                  onClick={handle7WondersClick}
+                  className="flex items-center justify-center gap-2 py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-medium transition-colors border border-gray-200 dark:border-gray-600"
+                >
+                  <Globe size={16} />
+                  Load 7 Wonders
+                </button>
+                <button 
+                  onClick={handleNearbyClick}
+                  className="flex items-center justify-center gap-2 py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-medium transition-colors border border-gray-200 dark:border-gray-600"
+                >
+                  <Database size={16} />
+                  Load Nearby Demo
                 </button>
               </div>
 

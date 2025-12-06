@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Navigation, Map as MapIcon, List, LocateFixed, User as UserIcon, LogOut, Cloud, CloudOff, Globe, AlertTriangle, Settings, CheckCircle2, Filter, ArrowUpDown } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Plus, Navigation, Map as MapIcon, List, LocateFixed, User as UserIcon, LogOut, Cloud, CloudOff, Globe, AlertTriangle, Settings, CheckCircle2, Filter, ArrowUpDown, Database } from 'lucide-react';
 import { BucketItem, GeoLocation, User } from './types';
 import { calculateDistance } from './utils/geoUtils';
 import { BucketCard } from './components/BucketCard';
@@ -59,7 +59,7 @@ const App: React.FC = () => {
   const [filterInterest, setFilterInterest] = useState<string>('');
   const [sortBy, setSortBy] = useState<SortOption>('date');
   const [showFilters, setShowFilters] = useState(false);
-
+  
   // Theme Effect
   useEffect(() => {
     const root = window.document.documentElement;
@@ -115,8 +115,6 @@ const App: React.FC = () => {
         return distA - distB;
       } else {
         // Default: Date Sort
-        // If completed view: sort by completedAt (newest first)
-        // If pending view: sort by createdAt (newest first)
         if (showCompletedOnly) {
            return (b.completedAt || 0) - (a.completedAt || 0);
         }
@@ -195,39 +193,51 @@ const App: React.FC = () => {
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setGeoError(null); // Clear previous errors
-        const newLoc = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        };
-        setCurrentLocation(newLoc);
-        checkProximity(newLoc);
-      },
-      (error) => {
-        // Fixed logging to ensure readable output
-        console.error(`Location error details: code=${error.code}, message=${error.message}`);
-        
-        let msg = "Unable to retrieve location.";
-        switch(error.code) {
-          case error.PERMISSION_DENIED:
-            msg = "Location permission denied. Please enable it in your browser settings.";
-            break;
-          case error.POSITION_UNAVAILABLE:
-            msg = "Location information is unavailable.";
-            break;
-          case error.TIMEOUT:
-            msg = "Location request timed out. Please check your signal or try moving to an open area.";
-            break;
-        }
-        setGeoError(msg);
-        if (error.code === error.PERMISSION_DENIED) {
+    const handleSuccess = (position: GeolocationPosition) => {
+      setGeoError(null);
+      const newLoc = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      };
+      setCurrentLocation(newLoc);
+      checkProximity(newLoc);
+    };
+
+    const handleError = (error: GeolocationPositionError, isLowAccuracy: boolean) => {
+      console.error(`Location error details: code=${error.code}, message=${error.message}`);
+      
+      // Error Code 3 = TIMEOUT
+      if (error.code === 3 && !isLowAccuracy) {
+        console.warn("High accuracy GPS timed out. Retrying with low accuracy (Wifi/Cell towers)...");
+        navigator.geolocation.getCurrentPosition(
+          handleSuccess,
+          (err) => handleError(err, true),
+          { enableHighAccuracy: false, timeout: 30000, maximumAge: Infinity }
+        );
+        return;
+      }
+
+      let msg = "Unable to retrieve location.";
+      switch(error.code) {
+        case 1: // PERMISSION_DENIED
+          msg = "Location permission denied. Please enable it in your browser settings.";
           setIsTracking(false);
-        }
-      },
-      // Increased timeout to 20s and allowed 10s old cached position to reduce timeout errors
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+          break;
+        case 2: // POSITION_UNAVAILABLE
+          msg = "Location information is unavailable.";
+          break;
+        case 3: // TIMEOUT
+          msg = "Location request timed out. Please check your signal or move to an open area.";
+          break;
+      }
+      setGeoError(msg);
+    };
+
+    // Attempt 1: High Accuracy (GPS), but relaxed timeout (30s) and cache age (60s)
+    navigator.geolocation.getCurrentPosition(
+      handleSuccess,
+      (err) => handleError(err, false),
+      { enableHighAccuracy: true, timeout: 30000, maximumAge: 60000 }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -237,14 +247,13 @@ const App: React.FC = () => {
     let intervalId: number;
     if (isTracking) {
       updateLocation(); // Initial call
-      intervalId = window.setInterval(updateLocation, 5000); // Check every 5s for faster updates during test
+      intervalId = window.setInterval(updateLocation, 10000); // Check every 10s (relaxed polling)
     }
     return () => clearInterval(intervalId);
   }, [isTracking, updateLocation]);
 
   const checkProximity = (currentLoc: GeoLocation) => {
     setItems(prevItems => {
-      // Logic unchanged, just updates in-memory state for notification status
       let hasChanges = false;
       const newItems = prevItems.map(item => {
         if (item.completed || item.notified) return item;
@@ -361,42 +370,73 @@ const App: React.FC = () => {
     setFocusedItemId(item.id);
   };
 
-  const handleLoadDemo = async () => {
-    const wonders = [
-      { title: "Great Wall of China", description: "Walk along the ancient fortification", category: "Adventure", interest: "Must try", targetLocation: { lat: 40.4319, lng: 116.5704 } },
-      { title: "Petra", description: "Explore the Rose City carved into rock", category: "Adventure", interest: "Before die", targetLocation: { lat: 30.3285, lng: 35.4444 } },
-      { title: "The Colosseum", description: "Visit the iconic symbol of Imperial Rome", category: "Culture", interest: "Must try", targetLocation: { lat: 41.8902, lng: 12.4922 } },
-      { title: "Chichén Itzá", description: "See the massive El Castillo pyramid", category: "Culture", interest: "ASAP", targetLocation: { lat: 20.6843, lng: -88.5678 } },
-      { title: "Machu Picchu", description: "Hike to the Incan citadel set high in the Andes", category: "Adventure", interest: "Before die", targetLocation: { lat: -13.1631, lng: -72.5450 } },
-      { title: "Taj Mahal", description: "Admire the ivory-white marble mausoleum", category: "Culture", interest: "Must try", targetLocation: { lat: 27.1751, lng: 78.0421 } },
-      { title: "Christ the Redeemer", description: "View the Art Deco statue of Jesus Christ", category: "Culture", interest: "ASAP", targetLocation: { lat: -22.9519, lng: -43.2105 } },
-    ];
+  // --- DEMO LOADERS ---
 
-    const newItems = wonders.map(w => ({
-      id: crypto.randomUUID(),
-      ...w,
-      completed: false,
-      notified: false,
-      createdAt: Date.now(),
-      userId: user?.uid
+  const ingestItems = async (itemsData: any[]) => {
+    const newItems = itemsData.map(data => ({
+        id: crypto.randomUUID(),
+        title: data.title,
+        description: data.description,
+        category: data.category,
+        interest: data.interest,
+        targetLocation: data.targetLocation,
+        completed: false,
+        notified: false,
+        createdAt: Date.now(),
+        userId: user?.uid
     }));
 
     if (user) {
-      setIsCloudLoading(true);
-      for (const item of newItems) {
-        await cloudService.addItem(user.uid, item);
-      }
-      setIsCloudLoading(false);
+        setIsCloudLoading(true);
+        for (const item of newItems) await cloudService.addItem(user.uid, item);
+        setIsCloudLoading(false);
     } else {
-      // Local DB Add
-      for (const item of newItems) {
-        await localDB.saveItem(item);
-      }
-      // Reload from DB to ensure sync
-      const dbItems = await localDB.getAllItems();
-      dbItems.sort((a, b) => b.createdAt - a.createdAt);
-      setItems(dbItems);
+        for (const item of newItems) await localDB.saveItem(item);
+        const dbItems = await localDB.getAllItems();
+        dbItems.sort((a, b) => b.createdAt - a.createdAt);
+        setItems(dbItems);
     }
+  };
+
+  const handleLoad7Wonders = async () => {
+    const wonders = [
+      { title: "Great Wall of China", cat: "Adventure", int: "Must try", loc: { lat: 40.4319, lng: 116.5704 } },
+      { title: "Petra", cat: "Adventure", int: "Before die", loc: { lat: 30.3285, lng: 35.4444 } },
+      { title: "The Colosseum", cat: "Culture", int: "Must try", loc: { lat: 41.8902, lng: 12.4922 } },
+      { title: "Chichén Itzá", cat: "Culture", int: "ASAP", loc: { lat: 20.6843, lng: -88.5678 } },
+      { title: "Machu Picchu", cat: "Adventure", int: "Before die", loc: { lat: -13.1631, lng: -72.5450 } },
+      { title: "Taj Mahal", cat: "Culture", int: "Must try", loc: { lat: 27.1751, lng: 78.0421 } },
+      { title: "Christ the Redeemer", cat: "Culture", int: "ASAP", loc: { lat: -22.9519, lng: -43.2105 } },
+    ];
+    await ingestItems(wonders.map(w => ({ title: w.title, category: w.cat, interest: w.int, targetLocation: w.loc, description: "One of the 7 Wonders" })));
+  };
+
+  const handleLoadNearbyDemo = async () => {
+    // If no location, default to Chennai for "Local" demo
+    const baseLat = currentLocation ? currentLocation.lat : 13.0827;
+    const baseLng = currentLocation ? currentLocation.lng : 80.2707;
+
+    const nearbyPlaces = [
+      { title: "Nearby Coffee Spot", cat: "Food", int: "Chill", desc: "Best brew in town." },
+      { title: "Local Park", cat: "Parks", int: "Chill", desc: "Great for morning walks." },
+      { title: "Historic Landmark", cat: "Culture", int: "Must try", desc: "Ancient architecture nearby." },
+      { title: "Street Food Market", cat: "Food", int: "ASAP", desc: "Spicy local treats." },
+      { title: "Shopping District", cat: "Cities", int: "Chill", desc: "Weekend shopping spree." },
+    ];
+
+    const newItems = nearbyPlaces.map(p => {
+        // Random scatter 1-3km
+        const latOffset = (Math.random() - 0.5) * 0.03; 
+        const lngOffset = (Math.random() - 0.5) * 0.03;
+        return {
+            title: p.title,
+            category: p.cat,
+            interest: p.int,
+            targetLocation: { lat: baseLat + latOffset, lng: baseLng + lngOffset },
+            description: p.desc
+        };
+    });
+    await ingestItems(newItems);
   };
 
   const toggleTracking = () => {
@@ -412,14 +452,58 @@ const App: React.FC = () => {
   };
 
   const handleDataImport = (data: any) => {
-    if (Array.isArray(data.items)) {
-      setItems(data.items);
-    }
-    if (Array.isArray(data.customBuckets)) {
-      setCustomBuckets(data.customBuckets);
-    }
-    if (Array.isArray(data.customInterests)) {
-      setCustomInterests(data.customInterests);
+    if (Array.isArray(data.items)) setItems(data.items);
+    if (Array.isArray(data.customBuckets)) setCustomBuckets(data.customBuckets);
+    if (Array.isArray(data.customInterests)) setCustomInterests(data.customInterests);
+  };
+
+  const handleTextImport = (text: string) => {
+    const lines = text.split('\n').filter(line => line.trim());
+    const itemsData = lines.map(line => ({
+        title: line.trim(),
+        category: 'Imported',
+        interest: 'Before die',
+        targetLocation: currentLocation || { lat: 0, lng: 0 },
+        description: 'Imported from text list'
+    }));
+    ingestItems(itemsData);
+  };
+
+  const handleGoogleTakeoutImport = (jsonText: string) => {
+    try {
+        const data = JSON.parse(jsonText);
+        const itemsData: any[] = [];
+        
+        if (data.features && Array.isArray(data.features)) {
+            data.features.forEach((feature: any) => {
+                if (feature.geometry && feature.properties) {
+                    const title = feature.properties.Title || feature.properties.Location?.["Business Name"] || feature.properties.Name || "Saved Place";
+                    const address = feature.properties["Address"] || feature.properties.Location?.["Address"] || "";
+                    
+                    itemsData.push({
+                        title: title,
+                        description: address,
+                        category: 'Google Maps',
+                        interest: 'Must try',
+                        targetLocation: {
+                            lat: feature.geometry.coordinates[1],
+                            lng: feature.geometry.coordinates[0]
+                        }
+                    });
+                }
+            });
+        }
+
+        if (itemsData.length > 0) {
+            ingestItems(itemsData);
+            alert(`Successfully imported ${itemsData.length} places from Google Takeout!`);
+        } else {
+            alert("No valid places found in the file.");
+        }
+
+    } catch (e) {
+        console.error("Failed to parse Google Takeout file", e);
+        alert("Failed to parse file.");
     }
   };
 
@@ -679,13 +763,16 @@ const App: React.FC = () => {
                         <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Adjust filters or add a new destination.</p>
                         
                         {!items.length && (
-                          <button 
-                            onClick={handleLoadDemo}
-                            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm rounded-full text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                          >
-                            <Globe size={16} className="text-blue-500" />
-                            Load 7 Wonders Demo
-                          </button>
+                          <div className="flex gap-2">
+                              <button onClick={handleLoad7Wonders} className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm rounded-full text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                <Globe size={16} className="text-blue-500" />
+                                Load 7 Wonders Demo
+                              </button>
+                              <button onClick={handleLoadNearbyDemo} className="flex items-center gap-2 px-4 py-2 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-800 shadow-sm rounded-full text-sm font-medium text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors">
+                                <Database size={16} />
+                                Load Nearby Demo
+                              </button>
+                          </div>
                         )}
                       </>
                     )}
@@ -757,6 +844,10 @@ const App: React.FC = () => {
         theme={theme}
         setTheme={setTheme}
         onImport={handleDataImport}
+        onImportFromText={handleTextImport}
+        onImportGoogleTakeout={handleGoogleTakeoutImport} 
+        onLoad7Wonders={handleLoad7Wonders}
+        onLoadNearbyDemo={handleLoadNearbyDemo}
       />
     </div>
   );
